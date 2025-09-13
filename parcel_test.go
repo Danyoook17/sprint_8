@@ -31,7 +31,6 @@ func getTestParcel() Parcel {
 
 // TestAddGetDelete проверяет добавление, получение и удаление посылки
 func TestAddGetDelete(t *testing.T) {
-	// prepare
 	db, err := sql.Open("sqlite", "tracker.db")
 	require.NoError(t, err)
 	defer db.Close()
@@ -44,21 +43,20 @@ func TestAddGetDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, id)
 
+	// ожидаемое значение должно содержать Number из БД
+	parcel.Number = id
+
 	// get
 	got, err := store.Get(id)
 	require.NoError(t, err)
-	require.Equal(t, parcel.Client, got.Client)
-	require.Equal(t, parcel.Status, got.Status)
-	require.Equal(t, parcel.Address, got.Address)
-	require.Equal(t, parcel.CreatedAt, got.CreatedAt)
+	require.Equal(t, parcel, got)
 
 	// delete
-	err = store.Delete(id)
-	require.NoError(t, err)
-
+	require.NoError(t, store.Delete(id))
 	_, err = store.Get(id)
 	require.Error(t, err)
 }
+
 
 func TestSetAddress(t *testing.T) {
 	// prepare
@@ -72,6 +70,8 @@ func TestSetAddress(t *testing.T) {
 	// add
 	id, err := store.Add(parcel)
 	require.NoError(t, err)
+	require.NotZero(t, id)
+	parcel.Number = id
 
 	// set address
 	newAddress := "new test address"
@@ -84,11 +84,13 @@ func TestSetAddress(t *testing.T) {
 	require.Equal(t, newAddress, got.Address)
 
 	// cleanup
-	_ = store.Delete(id)
+	err = store.Delete(id)
+	require.NoError(t, err)
 }
 
+
+
 func TestSetStatus(t *testing.T) {
-	// prepare
 	db, err := sql.Open("sqlite", "tracker.db")
 	require.NoError(t, err)
 	defer db.Close()
@@ -96,23 +98,23 @@ func TestSetStatus(t *testing.T) {
 	store := NewParcelStore(db)
 	parcel := getTestParcel()
 
-	// add
 	id, err := store.Add(parcel)
 	require.NoError(t, err)
+	parcel.Number = id
 
-	// set status
 	newStatus := "sent"
-	err = store.SetStatus(id, newStatus)
-	require.NoError(t, err)
+	require.NoError(t, store.SetStatus(id, newStatus))
 
-	// check
+	// обновляем ожидаемое значение и сравниваем целиком
+	parcel.Status = newStatus
+
 	got, err := store.Get(id)
 	require.NoError(t, err)
-	require.Equal(t, newStatus, got.Status)
+	require.Equal(t, parcel, got)
 
-	// cleanup
 	_ = store.Delete(id)
 }
+
 
 func TestGetByClient(t *testing.T) {
 	// prepare
@@ -127,17 +129,20 @@ func TestGetByClient(t *testing.T) {
 		getTestParcel(),
 		getTestParcel(),
 	}
-	parcelMap := map[int]Parcel{}
 
-	client := rand.Intn(10_000_000)
+	// задаём всем посылкам одного клиента
+	client := randRange.Intn(10_000_000)
 	for i := range parcels {
 		parcels[i].Client = client
 	}
 
-	// add
+	// добавляем посылки и сохраняем в map по номеру
+	parcelMap := make(map[int]Parcel)
 	for i := range parcels {
 		id, err := store.Add(parcels[i])
 		require.NoError(t, err)
+		require.NotZero(t, id)
+
 		parcels[i].Number = id
 		parcelMap[id] = parcels[i]
 	}
@@ -148,23 +153,17 @@ func TestGetByClient(t *testing.T) {
 	require.GreaterOrEqual(t, len(storedParcels), len(parcels))
 
 	// check
-	found := 0
 	for _, parcel := range storedParcels {
 		expected, ok := parcelMap[parcel.Number]
 		if !ok {
-			continue
+			continue // пропускаем чужие посылки этого же клиента, если такие есть
 		}
-		found++
-		require.Equal(t, expected.Client, parcel.Client)
-		require.Equal(t, expected.Status, parcel.Status)
-		require.Equal(t, expected.Address, parcel.Address)
-		require.Equal(t, expected.CreatedAt, parcel.CreatedAt)
+		require.Equal(t, expected, parcel)
 	}
-
-	require.Equal(t, len(parcels), found)
 
 	// cleanup
 	for _, p := range parcels {
-		_ = store.Delete(p.Number)
+		err := store.Delete(p.Number)
+		require.NoError(t, err)
 	}
 }

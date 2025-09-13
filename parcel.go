@@ -56,15 +56,19 @@ func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
 	var parcels []Parcel
 	for rows.Next() {
 		var p Parcel
-		err := rows.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
-		if err != nil {
+		if err := rows.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		parcels = append(parcels, p)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return parcels, nil
 }
+
 
 func (s ParcelStore) SetStatus(number int, status string) error {
 	query := `UPDATE parcel SET status = ? WHERE number = ?`
@@ -73,33 +77,42 @@ func (s ParcelStore) SetStatus(number int, status string) error {
 }
 
 func (s ParcelStore) SetAddress(number int, address string) error {
-	// сначала получим текущий статус
-	p, err := s.Get(number)
+	query := `UPDATE parcel
+	          SET address = ?
+	          WHERE number = ? AND status = ?`
+
+	res, err := s.db.Exec(query, address, number, ParcelStatusRegistered)
 	if err != nil {
 		return err
 	}
 
-	if p.Status != ParcelStatusRegistered {
-		return fmt.Errorf("нельзя изменить адрес: статус посылки не 'registered'")
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
 	}
-
-	query := `UPDATE parcel SET address = ? WHERE number = ?`
-	_, err = s.db.Exec(query, address, number)
-	return err
+	if n == 0 {
+		// либо посылки нет, либо статус не "registered"
+		return fmt.Errorf("нельзя изменить адрес: посылка №%d не существует или статус не 'registered'", number)
+	}
+	return nil
 }
 
 func (s ParcelStore) Delete(number int) error {
-	// сначала получим текущий статус
-	p, err := s.Get(number)
+	query := `DELETE FROM parcel
+	          WHERE number = ? AND status = ?`
+
+	res, err := s.db.Exec(query, number, ParcelStatusRegistered)
 	if err != nil {
 		return err
 	}
 
-	if p.Status != ParcelStatusRegistered {
-		return fmt.Errorf("нельзя удалить посылку: статус не 'registered'")
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
 	}
-
-	query := `DELETE FROM parcel WHERE number = ?`
-	_, err = s.db.Exec(query, number)
-	return err
+	if n == 0 {
+		// либо посылки нет, либо статус не "registered"
+		return fmt.Errorf("нельзя удалить посылку: №%d не существует или статус не 'registered'", number)
+	}
+	return nil
 }
